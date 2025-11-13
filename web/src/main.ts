@@ -12,8 +12,14 @@ async function loadSample(): Promise<void> {
             throw new Error(`HTTP ${response.status}`);
         }
         const base64 = (await response.text()).trim();
+
+        frameElement.onload = () => {
+            const width = frameElement.naturalWidth;
+            const height = frameElement.naturalHeight;
+            statsElement.textContent = `Frame stats → Resolution: ${width}×${height} | FPS: N/A (static sample) | Loaded at ${new Date().toLocaleString()}`;
+        };
+
         frameElement.src = `data:image/png;base64,${base64}`;
-        statsElement.textContent = `Loaded at ${new Date().toLocaleString()}`;
     } catch (error) {
         console.error("Failed to load sample image", error);
         statsElement.textContent = "Failed to load sample image.";
