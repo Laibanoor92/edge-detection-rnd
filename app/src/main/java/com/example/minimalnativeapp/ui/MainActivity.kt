@@ -1,18 +1,24 @@
-package com.example.minimalnativeapp
+package com.example.minimalnativeapp.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.SurfaceTexture
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.util.Log
+import android.view.TextureView
 import android.widget.Button
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.example.minimalnativeapp.R
+import com.example.minimalnativeapp.camera.Camera2Manager
+import com.example.minimalnativeapp.gl.CameraGLView
+import com.example.minimalnativeapp.nativebridge.NativeBridge
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -20,12 +26,17 @@ import java.nio.ByteBuffer
 
 class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
 
+    private lateinit var previewView: TextureView
     private lateinit var cameraView: CameraGLView
     private lateinit var captureButton: Button
+    private lateinit var toggleButton: Button
     private lateinit var cameraManager: Camera2Manager
 
     private var isCameraRunning = false
+    private var showProcessed = true
+
     private var lastProcessedFrame: ByteArray? = null
+    private var lastRawFrame: ByteArray? = null
     private var lastFrameWidth: Int = 0
     private var lastFrameHeight: Int = 0
 
@@ -39,27 +50,67 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
             } else {
                 Toast.makeText(
                     this,
-                    "Camera and storage permissions are required.",
+                    getString(R.string.permissions_required_message),
                     Toast.LENGTH_SHORT
                 ).show()
             }
         }
 
+    private val surfaceListener = object : TextureView.SurfaceTextureListener {
+        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+            cameraManager.setPreviewSurface(surface, width, height)
+            if (hasAllPermissions()) {
+                startCamera()
+            }
+        }
+
+        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+            cameraManager.setPreviewSurface(surface, width, height)
+        }
+
+        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+            stopCamera()
+            return true
+        }
+
+        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        previewView = findViewById(R.id.cameraPreview)
         cameraView = findViewById(R.id.cameraGLView)
         captureButton = findViewById(R.id.captureBtn)
+        toggleButton = findViewById(R.id.toggleBtn)
         cameraManager = Camera2Manager(this, this)
+
+        previewView.surfaceTextureListener = surfaceListener
 
         captureButton.setText(R.string.button_capture_frame)
         captureButton.setOnClickListener { saveLastFrame() }
+
+        toggleButton.setOnClickListener {
+            showProcessed = !showProcessed
+            updateToggleButton()
+            cameraView.setDisplayModeProcessed(showProcessed)
+        }
+        updateToggleButton()
     }
 
     override fun onResume() {
         super.onResume()
         cameraView.onResume()
+        if (!previewView.isAvailable) {
+            previewView.surfaceTextureListener = surfaceListener
+        } else {
+            cameraManager.setPreviewSurface(
+                previewView.surfaceTexture,
+                previewView.width,
+                previewView.height
+            )
+        }
         if (hasAllPermissions()) {
             startCamera()
         } else {
@@ -76,21 +127,25 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
     }
 
     override fun onFrameAvailable(bytes: ByteArray, width: Int, height: Int) {
+        val rawCopy = bytes.clone()
         val processed = try {
             NativeBridge.processFrame(bytes, width, height)
         } catch (error: UnsatisfiedLinkError) {
             Log.e(TAG, "Native processing library not loaded", error)
-            bytes.clone()
+            rawCopy
         } catch (error: Exception) {
             Log.e(TAG, "Native processing failed", error)
-            bytes.clone()
+            rawCopy
         }
 
+        lastRawFrame = rawCopy
         lastProcessedFrame = processed.clone()
         lastFrameWidth = width
         lastFrameHeight = height
 
+        cameraView.updateRawFrame(rawCopy, width, height)
         cameraView.updateTexture(processed, width, height)
+        cameraView.setDisplayModeProcessed(showProcessed)
     }
 
     private fun startCamera() {
@@ -98,7 +153,7 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
             requestRequiredPermissions()
             return
         }
-        if (isCameraRunning) return
+        if (!previewView.isAvailable || isCameraRunning) return
 
         try {
             cameraManager.openCamera()
@@ -108,7 +163,7 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
             requestRequiredPermissions()
         } catch (error: Exception) {
             Log.e(TAG, "Unable to start camera", error)
-            Toast.makeText(this, "Unable to start camera.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.error_start_camera, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -121,13 +176,13 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
     private fun saveLastFrame() {
         if (!hasStoragePermission()) {
             requestRequiredPermissions()
-            Toast.makeText(this, "Storage permission is required to save.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.storage_permission_required, Toast.LENGTH_SHORT).show()
             return
         }
 
         val frame = lastProcessedFrame
         if (frame == null || lastFrameWidth <= 0 || lastFrameHeight <= 0) {
-            Toast.makeText(this, "No processed frame available yet.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.capture_no_frame, Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -136,11 +191,11 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
 
         val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
-            Toast.makeText(this, "Failed to access Download directory.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.capture_download_dir_failed, Toast.LENGTH_SHORT).show()
             return
         }
 
-        val outputFile = File(downloadsDir, "processed.png")
+        val outputFile = File(downloadsDir, OUTPUT_FILENAME)
         try {
             FileOutputStream(outputFile).use { output ->
                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
@@ -153,11 +208,11 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
                 arrayOf("image/png"),
                 null
             )
-            Toast.makeText(this, "Saved to ${outputFile.absolutePath}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.capture_saved, outputFile.absolutePath), Toast.LENGTH_SHORT).show()
             Log.i(TAG, "Processed frame saved to ${outputFile.absolutePath}")
         } catch (error: IOException) {
             Log.e(TAG, "Failed to save processed frame", error)
-            Toast.makeText(this, "Failed to save processed frame.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -184,139 +239,18 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
         return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun updateToggleButton() {
+        toggleButton.setText(
+            if (showProcessed) R.string.button_show_raw else R.string.button_show_edges
+        )
+    }
+
     companion object {
         private const val TAG = "MainActivity"
+        private const val OUTPUT_FILENAME = "processed.png"
         private val REQUIRED_PERMISSIONS = arrayOf(
             Manifest.permission.CAMERA,
             Manifest.permission.WRITE_EXTERNAL_STORAGE
         )
-    }
-}package com.example.minimalnativeapp
-
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Bundle
-import android.util.Log
-import android.widget.Button
-import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-
-class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
-
-    private lateinit var cameraView: CameraGLView
-    private lateinit var captureButton: Button
-    private lateinit var cameraManager: Camera2Manager
-
-    private var isCameraRunning = false
-
-    private val cameraPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) {
-                startCamera()
-            } else {
-                Toast.makeText(this, "Camera permission is required", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        cameraView = findViewById(R.id.cameraGLView)
-        captureButton = findViewById(R.id.captureBtn)
-        cameraManager = Camera2Manager(this, this)
-
-        captureButton.setOnClickListener {
-            if (isCameraRunning) {
-                stopCamera()
-            } else {
-                startCamera()
-            }
-        }
-
-        requestCameraPermission()
-        updateCaptureButton()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        cameraView.onResume()
-        if (!isCameraRunning && hasCameraPermission()) {
-            startCamera()
-        }
-    }
-
-    override fun onPause() {
-        if (isCameraRunning) {
-            stopCamera()
-        }
-        cameraView.onPause()
-        super.onPause()
-    }
-
-    override fun onFrameAvailable(bytes: ByteArray, width: Int, height: Int) {
-        val processed = try {
-            NativeBridge.processFrame(bytes, width, height)
-        } catch (ex: UnsatisfiedLinkError) {
-            Log.e(TAG, "Native processing not available", ex)
-            bytes
-        } catch (ex: Exception) {
-            Log.e(TAG, "Native processing failed", ex)
-            bytes
-        }
-
-        cameraView.updateTexture(processed, width, height)
-    }
-
-    private fun startCamera() {
-        if (!hasCameraPermission()) {
-            requestCameraPermission()
-            return
-        }
-
-        if (isCameraRunning) return
-
-        try {
-            cameraManager.openCamera()
-            isCameraRunning = true
-            updateCaptureButton()
-        } catch (ex: SecurityException) {
-            Log.e(TAG, "Missing camera permission", ex)
-            requestCameraPermission()
-        } catch (ex: Exception) {
-            Log.e(TAG, "Unable to start camera", ex)
-            Toast.makeText(this, "Unable to start camera", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun stopCamera() {
-        if (!isCameraRunning) return
-        cameraManager.closeCamera()
-        isCameraRunning = false
-        updateCaptureButton()
-    }
-
-    private fun updateCaptureButton() {
-        captureButton.text = if (isCameraRunning) {
-            getString(R.string.button_stop_camera)
-        } else {
-            getString(R.string.button_start_camera)
-        }
-    }
-
-    private fun hasCameraPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun requestCameraPermission() {
-        if (!hasCameraPermission()) {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-        }
-    }
-
-    companion object {
-        private const val TAG = "MainActivity"
     }
 }

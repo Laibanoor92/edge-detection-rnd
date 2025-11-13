@@ -1,9 +1,10 @@
-package com.example.minimalnativeapp
+package com.example.minimalnativeapp.camera
 
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -15,7 +16,6 @@ import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
-import android.graphics.SurfaceTexture
 import android.util.Log
 import android.util.Size
 import android.view.Surface
@@ -43,13 +43,31 @@ class Camera2Manager(
     private var imageReader: ImageReader? = null
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
-    private var previewSurfaceTexture: SurfaceTexture? = null
-    private var previewSurface: Surface? = null
+
+    @Volatile private var previewSurfaceTexture: SurfaceTexture? = null
+    @Volatile private var previewSurface: Surface? = null
 
     private var previewSize: Size? = null
     private var cameraId: String? = null
 
+    fun setPreviewSurface(texture: SurfaceTexture, width: Int, height: Int) {
+        previewSurface?.release()
+        previewSurface = Surface(texture)
+        previewSurfaceTexture = texture.apply {
+            setDefaultBufferSize(width, height)
+        }
+        previewSize?.let { size ->
+            previewSurfaceTexture?.setDefaultBufferSize(size.width, size.height)
+        }
+    }
+
     fun openCamera() {
+        val surface = previewSurface
+        if (surface == null) {
+            Log.w(TAG, "Preview surface is not ready yet; cannot open camera")
+            return
+        }
+
         try {
             if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 throw SecurityException("Camera permission not granted")
@@ -88,8 +106,6 @@ class Camera2Manager(
             imageReader = null
             previewSurface?.release()
             previewSurface = null
-            previewSurfaceTexture?.release()
-            previewSurfaceTexture = null
         } catch (ex: InterruptedException) {
             throw RuntimeException("Interrupted while closing camera", ex)
         } finally {
@@ -123,15 +139,7 @@ class Camera2Manager(
             setOnImageAvailableListener(onImageAvailableListener, backgroundHandler)
         }
 
-        previewSurface?.release()
-        previewSurface = null
-        previewSurfaceTexture?.release()
-        previewSurfaceTexture = null
-
-        previewSurfaceTexture = SurfaceTexture(0).apply {
-            setDefaultBufferSize(size.width, size.height)
-        }
-        previewSurface = Surface(previewSurfaceTexture)
+        previewSurfaceTexture?.setDefaultBufferSize(size.width, size.height)
     }
 
     private fun chooseOptimalSize(configMap: StreamConfigurationMap): Size {
@@ -167,7 +175,8 @@ class Camera2Manager(
     private fun createCaptureSession(device: CameraDevice) {
         val readerSurface = imageReader?.surface
             ?: throw IllegalStateException("ImageReader surface not ready")
-        val preview = previewSurface ?: throw IllegalStateException("Preview surface not initialized")
+        val preview = previewSurface
+            ?: throw IllegalStateException("Preview surface not initialized")
 
         try {
             device.createCaptureSession(listOf(readerSurface, preview), object : CameraCaptureSession.StateCallback() {
@@ -189,8 +198,8 @@ class Camera2Manager(
     private fun startRepeatingRequest(
         session: CameraCaptureSession,
         device: CameraDevice,
-        readerSurface: android.view.Surface,
-        previewSurface: android.view.Surface
+        readerSurface: Surface,
+        previewSurface: Surface
     ) {
         try {
             val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {

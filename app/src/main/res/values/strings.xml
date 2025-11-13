@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MinimalNativeApp</string>
-    <string name="button_start_camera">Start Camera</string>
-    <string name="button_stop_camera">Stop Camera</string>
+    <string name="button_capture_frame">Capture Frame</string>
+    <string name="button_show_raw">Show Raw</string>
+    <string name="button_show_edges">Show Edges</string>
+    <string name="permissions_required_message">Camera and storage permissions are required.</string>
+    <string name="error_start_camera">Unable to start camera.</string>
+    <string name="storage_permission_required">Storage permission is required to save frames.</string>
+    <string name="capture_no_frame">No processed frame available yet.</string>
+    <string name="capture_download_dir_failed">Failed to access Download directory.</string>
+    <string name="capture_saved">Saved to %1$s</string>
+    <string name="capture_failed">Failed to save processed frame.</string>
 </resources>

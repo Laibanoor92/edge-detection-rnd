@@ -14,7 +14,14 @@ local.properties
 .DS_Store
 Thumbs.db
 
+# Gradle distribution artifacts
 /gradle-8.2-bin/
 /gradle-8.2-bin.zip
 *.jar
-.gradle/
+
+# Web viewer artifacts
+web/node_modules/
+web/dist/
+
+# Native SDKs (user supplied)
+app/src/main/cpp/opencv/

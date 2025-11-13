@@ -43,7 +43,7 @@ bool copyByteArrayToMat(JNIEnv* env, jbyteArray input, cv::Mat& destination) {
 } // namespace
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_example_minimalnativeapp_NativeBridge_processFrame(
+Java_com_example_minimalnativeapp_nativebridge_NativeBridge_processFrame(
         JNIEnv* env,
         jobject /* thiz */,
         jbyteArray frameData,
