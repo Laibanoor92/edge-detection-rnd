@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MinimalNativeApp</string>
+    <string name="button_start_camera">Start Camera</string>
+    <string name="button_stop_camera">Stop Camera</string>
 </resources>

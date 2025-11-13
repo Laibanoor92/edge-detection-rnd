@@ -4,18 +4,29 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.opengl.GLSurfaceView
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
 
     private lateinit var cameraView: GLSurfaceView
     private lateinit var captureButton: Button
+    private lateinit var cameraManager: Camera2Manager
+
+    private var isCameraRunning = false
 
     private val cameraPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op for now */ }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                startCamera()
+            } else {
+                Toast.makeText(this, "Camera permission is required", Toast.LENGTH_SHORT).show()
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -23,18 +34,86 @@ class MainActivity : AppCompatActivity() {
 
         cameraView = findViewById(R.id.cameraGLView)
         captureButton = findViewById(R.id.captureBtn)
+        cameraManager = Camera2Manager(this, this)
 
         captureButton.setOnClickListener {
-            // TODO: add capture logic
+            if (isCameraRunning) {
+                stopCamera()
+            } else {
+                startCamera()
+            }
         }
 
         requestCameraPermission()
+        updateCaptureButton()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!isCameraRunning && hasCameraPermission()) {
+            startCamera()
+        }
+    }
+
+    override fun onPause() {
+        if (isCameraRunning) {
+            stopCamera()
+        }
+        super.onPause()
+    }
+
+    override fun onFrameAvailable(bytes: ByteArray, width: Int, height: Int) {
+        Log.d(TAG, "Frame received: ${'$'}width x ${'$'}height (${bytes.size} bytes)")
+        // Future work: feed bytes into renderer / processing pipeline.
+    }
+
+    private fun startCamera() {
+        if (!hasCameraPermission()) {
+            requestCameraPermission()
+            return
+        }
+
+        if (isCameraRunning) return
+
+        try {
+            cameraManager.openCamera()
+            isCameraRunning = true
+            updateCaptureButton()
+        } catch (ex: SecurityException) {
+            Log.e(TAG, "Missing camera permission", ex)
+            requestCameraPermission()
+        } catch (ex: Exception) {
+            Log.e(TAG, "Unable to start camera", ex)
+            Toast.makeText(this, "Unable to start camera", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopCamera() {
+        if (!isCameraRunning) return
+        cameraManager.closeCamera()
+        isCameraRunning = false
+        updateCaptureButton()
+    }
+
+    private fun updateCaptureButton() {
+        captureButton.text = if (isCameraRunning) {
+            getString(R.string.button_stop_camera)
+        } else {
+            getString(R.string.button_start_camera)
+        }
+    }
+
+    private fun hasCameraPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun requestCameraPermission() {
-        val permissionState = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-        if (permissionState != PackageManager.PERMISSION_GRANTED) {
+        if (!hasCameraPermission()) {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
     }
 }
