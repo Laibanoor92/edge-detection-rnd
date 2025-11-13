@@ -1,0 +1,11 @@
+{
+  "name": "processed-frame-web-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
