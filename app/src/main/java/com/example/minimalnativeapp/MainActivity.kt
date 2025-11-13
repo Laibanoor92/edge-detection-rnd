@@ -2,7 +2,6 @@ package com.example.minimalnativeapp
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
@@ -13,7 +12,7 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
 
-    private lateinit var cameraView: GLSurfaceView
+    private lateinit var cameraView: CameraGLView
     private lateinit var captureButton: Button
     private lateinit var cameraManager: Camera2Manager
 
@@ -50,6 +49,7 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
 
     override fun onResume() {
         super.onResume()
+        cameraView.onResume()
         if (!isCameraRunning && hasCameraPermission()) {
             startCamera()
         }
@@ -59,12 +59,22 @@ class MainActivity : AppCompatActivity(), Camera2Manager.FrameListener {
         if (isCameraRunning) {
             stopCamera()
         }
+        cameraView.onPause()
         super.onPause()
     }
 
     override fun onFrameAvailable(bytes: ByteArray, width: Int, height: Int) {
-        Log.d(TAG, "Frame received: ${'$'}width x ${'$'}height (${bytes.size} bytes)")
-        // Future work: feed bytes into renderer / processing pipeline.
+        val processed = try {
+            NativeBridge.processFrame(bytes, width, height)
+        } catch (ex: UnsatisfiedLinkError) {
+            Log.e(TAG, "Native processing not available", ex)
+            bytes
+        } catch (ex: Exception) {
+            Log.e(TAG, "Native processing failed", ex)
+            bytes
+        }
+
+        cameraView.updateTexture(processed, width, height)
     }
 
     private fun startCamera() {
